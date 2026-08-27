@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mai-core"
+version = "0.1.0"
+description = "Mai's backend: LLM/prompt engine, personality, mood, and command resolution logic."
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+    "PyYAML",
+]
+
+[tool.setuptools]
+py-modules = ["engine", "mai_personality"]
+packages = ["utils", "daemons"]
