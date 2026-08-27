@@ -78,4 +78,4 @@ class Paths:
 
     # ---- Custom commands / daemons ------------------------------------
     CUSTOM_COMMANDS   = "jsons/configs/custom_commands.json"
-    CUSTOM_DAEMONS_DIR = "daemons/custom"
+    CUSTOM_DAEMONS_DIR = "custom_daemons"
