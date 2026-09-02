@@ -204,6 +204,7 @@ def build_contextual_prompt(
     context: str,
     recent_messages: list[str] | None = None,
     mood_context: dict | None = None,
+    cognitive_context: str | None = None,
 ) -> tuple[str, str]:
     """Build a context-aware prompt for Mai.
 
@@ -230,8 +231,12 @@ def build_contextual_prompt(
             f"(match this energy and cadence — don't repeat them verbatim):\n{examples_text}"
         )
 
+    cognitive_block = (cognitive_context or "").strip()
+    cognitive_section = f"\n\n{cognitive_block}" if cognitive_block else ""
+
     system = (
-        f"{identity}\n\n"
+        f"{identity}"
+        f"{cognitive_section}\n\n"
         f"Context detected: {context}\n"
         f"{recent_history_block}\n"
         f"{mood_block}\n\n"
@@ -257,7 +262,7 @@ _PROMPT_LEAK_PATTERNS = re.compile(
 def _clean_llm_response(response: str) -> str:
     """Normalize model output and strip common wrappers/preambles."""
     response = str(response).strip()
-    preambles = ["Here's my response:", "Mai said:", "Mai:", "Response:", "*", '"']
+    preambles = ["Here's my response:", "Mai said:", "[Mai]:", "Mai:", "Response:", "*", '"']
     for preamble in preambles:
         if response.startswith(preamble):
             response = response[len(preamble):].strip()
@@ -279,6 +284,7 @@ def _generate_with_prompt(
     extra_guidance: str = "",
     recent_messages: list[str] | None = None,
     mood_context: dict | None = None,
+    cognitive_context: str | None = None,
 ) -> str:
     """Shared response generation path with optional user-specific guidance."""
     context = detect_context(message)
@@ -288,6 +294,7 @@ def _generate_with_prompt(
         context,
         recent_messages=recent_messages,
         mood_context=mood_context,
+        cognitive_context=cognitive_context,
     )
 
     if extra_guidance:
@@ -327,6 +334,7 @@ def generate_contextual_response(
     owner_username: str = WITCH_USERNAME,
     recent_messages: list[str] | None = None,
     mood_context: dict | None = None,
+    cognitive_context: str | None = None,
 ) -> str:
     """Generate a context-aware response using Mai's personality."""
     if is_mordraga(username, owner_username=owner_username):
@@ -337,6 +345,7 @@ def generate_contextual_response(
             owner_username=owner_username,
             recent_messages=recent_messages,
             mood_context=mood_context,
+            cognitive_context=cognitive_context,
         )
 
     return _generate_with_prompt(
@@ -345,6 +354,7 @@ def generate_contextual_response(
         llm_backend,
         recent_messages=recent_messages,
         mood_context=mood_context,
+        cognitive_context=cognitive_context,
     )
 
 
@@ -355,6 +365,7 @@ def mordraga_chat(
     owner_username: str = WITCH_USERNAME,
     recent_messages: list[str] | None = None,
     mood_context: dict | None = None,
+    cognitive_context: str | None = None,
 ) -> str:
     """Owner-specific response path with stronger familiar-bond behavior."""
     owner_guidance: str = _p("owner_guidance", "Be extra loyal and affectionate, without being submissive.")
@@ -369,6 +380,7 @@ def mordraga_chat(
         recent_messages=recent_messages,
         extra_guidance=combined_guidance,
         mood_context=mood_context,
+        cognitive_context=cognitive_context,
     )
 
 

@@ -20,6 +20,7 @@ from utils.mood_engine import resolve_effective_mood
 from utils.paths import Paths
 from utils.rate_limiter import GlobalRateLimiter, UserCooldownTracker
 from engine import build_prompt_from_keyword, ask_openrouter
+from relationships import relationship_core
 
 
 # Global instances
@@ -203,7 +204,18 @@ if __name__ == "__main__":
             "mood_guidance": mood_context.get("guidance", ""),
         }
 
-        prompt = build_prompt_from_keyword("flirt", context=prompt_context)
+        cognitive_context = None
+        try:
+            cognitive_context, _ = relationship_core.build_cognitive_context(
+                username=username, message=command_str, task="flirt",
+                owner_username=_monitor_config.get("owner_username", ""),
+            )
+        except Exception:
+            cognitive_context = None
+
+        prompt = build_prompt_from_keyword(
+            "flirt", context=prompt_context, cognitive_context=cognitive_context, mood_context=mood_context
+        )
         if prompt.startswith("WARNING:"):
             raise Exception(prompt)
 

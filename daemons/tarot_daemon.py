@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from engine import ask_openrouter, build_prompt_from_keyword
+from relationships import relationship_core
 from utils.cooldown_messages import choose_tool_cooldown_template, format_cooldown_template
 from utils.helpers import load_json, log_event, parse_all_params, write_to_file
 from utils.mood_engine import resolve_effective_mood
@@ -67,6 +68,7 @@ def build_tarot_prompt(
     positions: list[str],
     drawn: list[tuple[dict, str]],
     mood_context: dict | None = None,
+    username: str = "",
 ) -> str:
     """Build the AI prompt for a tarot reading using the engine template registry."""
     card_lines: list[str] = []
@@ -89,7 +91,20 @@ def build_tarot_prompt(
         "mood_name": str((mood_context or {}).get("name", "neutral")).strip() or "neutral",
         "mood_guidance": str((mood_context or {}).get("guidance", "")).strip(),
     }
-    return build_prompt_from_keyword("tarot", context=prompt_context)
+
+    cognitive_context = None
+    if username:
+        try:
+            owner_username = load_json(Paths.CONFIG, default={}).get("monitor", {}).get("owner_username", "")
+            cognitive_context, _ = relationship_core.build_cognitive_context(
+                username=username, message=question, task="tarot", owner_username=owner_username
+            )
+        except Exception:
+            cognitive_context = None
+
+    return build_prompt_from_keyword(
+        "tarot", context=prompt_context, cognitive_context=cognitive_context, mood_context=mood_context
+    )
 
 # =============================
 # GLOBAL INSTANCES
@@ -186,7 +201,7 @@ if __name__ == "__main__":
         drawn = list(zip(sampled, orientations))
         mood_context = resolve_effective_mood("tarot", require_active_session=True)
 
-        prompt = build_tarot_prompt(question, spread_description, positions, drawn, mood_context=mood_context)
+        prompt = build_tarot_prompt(question, spread_description, positions, drawn, mood_context=mood_context, username=username)
         if prompt.startswith("WARNING:"):
             raise Exception(prompt)
 

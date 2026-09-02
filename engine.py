@@ -115,6 +115,8 @@ def build_prompt_from_keyword(
     context: Mapping[str, Any] | None = None,
     registry: Mapping[str, Any] | None = None,
     templates: Mapping[str, Any] | None = None,
+    cognitive_context: str | None = None,
+    mood_context: Mapping[str, Any] | None = None,
 ) -> str:
     template_data = templates if templates is not None else load_json(Paths.PROMPT_TEMPLATES, default={})
     registry_data = registry if registry is not None else load_json(Paths.REGISTRY, default={})
@@ -157,10 +159,31 @@ def build_prompt_from_keyword(
             )
         rendered = template.format_map(safe).strip()
 
-    # Prepend personality identity block so the LLM knows who it is
+    # Prepend personality identity block so the LLM knows who it is, with
+    # session mood and the relationship/needs/Parts cognitive context (when
+    # supplied) placed between identity and the task body per the spec's
+    # PERSONALITY + COGNITIVE + TASK ordering.
+    #
+    # mood_context gets its own guaranteed block here rather than relying
+    # on the template text referencing {mood_name}/{mood_guidance} from the
+    # context dict — a template that omits those placeholders would
+    # otherwise silently drop mood from the prompt entirely.
     identity = personality.get("identity", "").strip()
-    if identity:
-        return f"{identity}\n\n---\n\n{rendered}"
+
+    mood_name = str((mood_context or {}).get("name", "")).strip()
+    mood_guidance = str((mood_context or {}).get("guidance", "")).strip()
+    mood_block = ""
+    if mood_context and (mood_name or mood_guidance):
+        mood_block = (
+            f"Current session mood: {mood_name or 'neutral'}\n"
+            f"Mood guidance: {mood_guidance or 'No special mood guidance.'}"
+        )
+
+    cognitive_block = (cognitive_context or "").strip()
+
+    blocks = [b for b in (identity, mood_block, cognitive_block) if b]
+    if blocks:
+        return "\n\n---\n\n".join(blocks + [rendered])
     return rendered
 
 
@@ -168,7 +191,12 @@ def build_prompt_from_keyword(
 # OpenRouter Backend
 # =============================
 
-def ask_openrouter(prompt: str, spicy: bool = False, system_prompt: str | None = None) -> str:
+def ask_openrouter(
+    prompt: str,
+    spicy: bool = False,
+    system_prompt: str | None = None,
+    max_tokens: int | None = None,
+) -> str:
     config = load_config()
     keys = load_keys()
 
@@ -179,7 +207,8 @@ def ask_openrouter(prompt: str, spicy: bool = False, system_prompt: str | None =
         return f"WARNING: Missing OpenRouter API key in {Paths.KEYS}"
 
     model = mai_config.get("model", "mistralai/mistral-7b-instruct")
-    max_tokens = mai_config.get("max_tokens", 60)
+    if max_tokens is None:
+        max_tokens = mai_config.get("max_tokens", 60)
     temp_key = "temperature_spicy" if spicy else "temperature_normal"
     temperature = mai_config.get(temp_key, mai_config.get("temperature_normal", 0.85))
     timeout = mai_config.get("timeout", 30)

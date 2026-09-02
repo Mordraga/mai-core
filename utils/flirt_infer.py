@@ -112,7 +112,7 @@ def generate_flirt(
         "mood_guidance": mood_context.get("guidance", ""),
     }
 
-    prompt = build_prompt_from_keyword("flirt", context=prompt_context)
+    prompt = build_prompt_from_keyword("flirt", context=prompt_context, mood_context=mood_context)
     if prompt.startswith("WARNING:"):
         return ""
 

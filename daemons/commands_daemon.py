@@ -137,7 +137,14 @@ def build_command_prompt(
     user_level: str,
     min_level: str,
     command_data: dict,
+    cognitive_context: str | None = None,
+    mood_context: dict | None = None,
 ) -> str:
+    # cognitive_context accepted for call-site shape compatibility with the
+    # other task templates. Not wired to a live relationship_core call here
+    # yet — command-abuse-triggers-Crash needs pet-peeve tracking, which is
+    # spec Phase 4 (relationship mutation / observation extraction), not
+    # built in this pass.
     context = {
         "command": command_key,
         "username": username,
@@ -151,7 +158,9 @@ def build_command_prompt(
         "command_args": command_args,
         "raw_input": raw_input,
     }
-    return build_prompt_from_keyword("commands", context=context)
+    return build_prompt_from_keyword(
+        "commands", context=context, cognitive_context=cognitive_context, mood_context=mood_context
+    )
 
 
 if __name__ == "__main__":

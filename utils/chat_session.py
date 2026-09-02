@@ -27,6 +27,7 @@ from mai_personality import (
     is_mordraga,
     mordraga_chat,
 )
+from relationships import relationship_core
 from utils.helpers import apply_tos_redaction, load_json
 from utils.mood_engine import resolve_effective_mood
 from utils.paths import Paths
@@ -40,6 +41,22 @@ class ChatResult:
     mood: str = "neutral"
     is_command: bool = False
     llm_error: str | None = None
+    # Debug-only: the relationship/needs/Parts cognitive context text built
+    # for this turn (None when unavailable, e.g. command messages don't
+    # build one, or the relationship layer failed and fell back silently).
+    # Not meant for the public-facing response — see spec section 2.4
+    # ("invisible mechanics") — this is for a debug UI only.
+    cognitive_context: str | None = None
+    partcore_active: str | None = None
+    partcore_secondary: list[str] = field(default_factory=list)
+
+
+def _partcore_debug_fields(partcore_result) -> tuple[str | None, list[str]]:
+    """Extract (active_part_name, secondary_part_names) from a
+    PartcoreResult for ChatResult's debug fields, tolerant of None."""
+    if partcore_result is None or partcore_result.active is None:
+        return None, []
+    return partcore_result.active.part, [v.part for v in partcore_result.secondary]
 
 
 def _run_command(
@@ -101,6 +118,9 @@ def _run_command(
         )
         return ChatResult(response=output, context="command", mood="neutral", is_command=True)
 
+    mood_context = resolve_effective_mood("monitor", require_active_session=False)
+    mood_name = str(mood_context.get("name", "neutral"))
+
     prompt = build_command_prompt(
         command_key=resolved_key,
         command_args=command_args,
@@ -109,10 +129,8 @@ def _run_command(
         user_level=user_level,
         min_level=min_level,
         command_data=command_cfg,
+        mood_context=mood_context,
     )
-
-    mood_context = resolve_effective_mood("monitor", require_active_session=False)
-    mood_name = str(mood_context.get("name", "neutral"))
 
     try:
         response = ask_openrouter(prompt, spicy=False)
@@ -126,7 +144,7 @@ def _run_command(
         response = f"Command !{resolved_key} ran into an issue. Try again."
 
     flagged = []
-    if platform == "twitch":
+    if platform in ("twitch", "discord"):
         response, flagged = apply_tos_redaction(response, redaction_data)
 
     return ChatResult(response=response, flagged_terms=flagged, context="command", mood=mood_name, is_command=True)
@@ -166,6 +184,23 @@ def generate_chat_response(
         mood_context = dict(mood_context)
         mood_context["spice_level"] = max(1, min(11, int(spice_override)))
 
+    # Relationship/needs/Parts cognitive context. A bug in this new layer
+    # must never break chat, so any failure here just falls back to no
+    # cognitive context rather than propagating.
+    cognitive_context = None
+    partcore_result = None
+    try:
+        cognitive_context, partcore_result = relationship_core.build_cognitive_context(
+            username=username,
+            message=message,
+            recent_messages=recent_messages,
+            task=context,
+            owner_username=owner_username,
+        )
+    except Exception:
+        cognitive_context = None
+        partcore_result = None
+
     try:
         if is_mordraga(username, owner_username=owner_username):
             response = mordraga_chat(
@@ -175,6 +210,7 @@ def generate_chat_response(
                 owner_username=owner_username,
                 mood_context=mood_context,
                 recent_messages=recent_messages,
+                cognitive_context=cognitive_context,
             )
         else:
             response = generate_contextual_response(
@@ -184,26 +220,43 @@ def generate_chat_response(
                 owner_username=owner_username,
                 mood_context=mood_context,
                 recent_messages=recent_messages,
+                cognitive_context=cognitive_context,
             )
 
         if response.startswith("WARNING:"):
             raise RuntimeError(response)
 
     except Exception as _exc:
+        partcore_active, partcore_secondary = _partcore_debug_fields(partcore_result)
         return ChatResult(
             response=get_contextual_fallback(context),
             context=context,
             mood=mood_name,
             llm_error=str(_exc),
+            cognitive_context=cognitive_context,
+            partcore_active=partcore_active,
+            partcore_secondary=partcore_secondary,
         )
 
+    if partcore_result is not None:
+        try:
+            relationship_core.post_response_update(
+                username, message, response, partcore_result, owner_username=owner_username
+            )
+        except Exception:
+            pass  # Never let the debug-only relationship layer break chat.
+
     flagged: list[str] = []
-    if platform == "twitch":
+    if platform in ("twitch", "discord"):
         response, flagged = apply_tos_redaction(response, redaction_data)
 
+    partcore_active, partcore_secondary = _partcore_debug_fields(partcore_result)
     return ChatResult(
         response=response,
         flagged_terms=flagged,
         context=context,
         mood=mood_name,
+        cognitive_context=cognitive_context,
+        partcore_active=partcore_active,
+        partcore_secondary=partcore_secondary,
     )

@@ -33,6 +33,7 @@ class Paths:
     COMMAND_ACCESS   = "jsons/data/command_access.json"
     MOODS            = "jsons/data/moods.json"
     MOOD_STATE       = "jsons/data/session_mood.json"
+    NEEDS_STATE      = "jsons/data/needs_state.json"
 
     # ---- Calls / routing -----------------------------------------------
     CALLS_LOG        = "jsons/calls/calls.json"
@@ -48,6 +49,13 @@ class Paths:
     FLAGGED_RESPONSES  = "jsons/logs/history/flagged_responses.json"
     USER_REGISTRY      = "jsons/logs/history/user_registry.json"
     USER_HISTORY_DIR   = "jsons/logs/history/users"
+    # Deliberately separate from USER_HISTORY_DIR: the consuming app (e.g.
+    # MaiDaemon's mai_monitor.py) already owns per-user files under
+    # USER_HISTORY_DIR for its own message-log/stream-count tracking
+    # (a different schema — messages/first_seen/last_seen). Reusing that
+    # directory for relationship records would silently clobber that data
+    # the first time a relationship record is saved for the same username.
+    RELATIONSHIPS_DIR  = "jsons/logs/history/relationships"
 
     # ---- Errors --------------------------------------------------------
     ERROR_LOG        = "jsons/logs/errors/error_log.json"
