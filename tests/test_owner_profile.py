@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from mai_personality import _owner_profile, _owner_profile_instruction, generate_contextual_response
 
