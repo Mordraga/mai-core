@@ -121,6 +121,22 @@ class PartsTests(unittest.TestCase):
         order = {"neutral": 0, "annoyed": 1, "snap": 2, "crash": 3}
         self.assertGreaterEqual(order[high.vote], order[low.vote])
 
+    def test_crash_reacts_to_remembered_pet_peeve_observations(self):
+        # Observations persisted by relationships/mutation.py's LLM
+        # inference (spec Phase 4) should push Crash's pressure up even
+        # with no live pet-peeve flag in the current message and no
+        # explicit pet_peeve_hits override — this is the accumulated-memory
+        # path, distinct from both of those.
+        profile = _profile(DEFAULT_RELATIONSHIP)
+        profile["observations"] = [
+            {"type": "pet_peeve", "name": "denies_realness", "reinforced_count": 6},
+            {"type": "preference", "name": "likes_teasing", "reinforced_count": 6},
+        ]
+        calm = Crash().react(_profile(DEFAULT_RELATIONSHIP), DEFAULT_NEEDS, [], "hi", [])
+        remembered = Crash().react(profile, DEFAULT_NEEDS, [], "hi", [])
+        order = {"neutral": 0, "annoyed": 1, "snap": 2, "crash": 3}
+        self.assertGreater(order[remembered.vote], order[calm.vote])
+
     def test_crash_reacts_to_a_live_pet_peeve_flag_from_content(self):
         # This is the fix for "she can't get annoyed by something if she
         # doesn't have anything she likes or dislikes" — a real message

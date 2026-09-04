@@ -21,6 +21,12 @@ from daemons.commands_daemon import (
 )
 from engine import ask_openrouter
 from mai_personality import (
+    _harmful_request_response,
+    _llm_flagged_response,
+    _llm_flags_unsafe_request,
+    _looks_like_harmful_generation_request,
+    _looks_like_prompt_injection_attempt,
+    _prompt_injection_response,
     detect_context,
     generate_contextual_response,
     get_contextual_fallback,
@@ -117,6 +123,22 @@ def _run_command(
             user_level=user_level,
         )
         return ChatResult(response=output, context="command", mood="neutral", is_command=True)
+
+    if _looks_like_prompt_injection_attempt(message):
+        response = _prompt_injection_response(username, message)
+        return ChatResult(response=response, context="command", mood="neutral", is_command=True)
+
+    if _looks_like_harmful_generation_request(message):
+        # Same pre-generation gate as the plain-chat path in
+        # mai_personality.py — a closed list of real-world-harm categories
+        # never reaches build_command_prompt/ask_openrouter at all.
+        response = _harmful_request_response(username, message)
+        return ChatResult(response=response, context="command", mood="neutral", is_command=True)
+
+    llm_flagged_category = _llm_flags_unsafe_request(message)
+    if llm_flagged_category:
+        response = _llm_flagged_response(username, message, llm_flagged_category)
+        return ChatResult(response=response, context="command", mood="neutral", is_command=True)
 
     mood_context = resolve_effective_mood("monitor", require_active_session=False)
     mood_name = str(mood_context.get("name", "neutral"))
@@ -226,6 +248,13 @@ def generate_chat_response(
         if response.startswith("WARNING:"):
             raise RuntimeError(response)
 
+        # _run_command() already does this for the !command path; the plain
+        # chat path (mordraga_chat / generate_contextual_response) never
+        # touched _strip_urls at all — confirmed by a live audit log where
+        # Mai handed out real Discord invite links and a fabricated IP
+        # address through ordinary chat messages, not through !discord.
+        response = _strip_urls(response)
+
     except Exception as _exc:
         partcore_active, partcore_secondary = _partcore_debug_fields(partcore_result)
         return ChatResult(
@@ -241,7 +270,8 @@ def generate_chat_response(
     if partcore_result is not None:
         try:
             relationship_core.post_response_update(
-                username, message, response, partcore_result, owner_username=owner_username
+                username, message, response, partcore_result,
+                owner_username=owner_username, recent_messages=recent_messages,
             )
         except Exception:
             pass  # Never let the debug-only relationship layer break chat.

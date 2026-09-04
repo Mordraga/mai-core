@@ -68,6 +68,26 @@ class ChatSessionDebugContextTests(unittest.TestCase):
         self.assertIsNone(result.partcore_active)
         self.assertEqual(result.partcore_secondary, [])
 
+    @patch("utils.chat_session.generate_contextual_response")
+    def test_plain_chat_path_strips_leaked_urls_and_ips(self, mock_generate):
+        # Regression test for a live audit-log incident: real Discord invite
+        # links and a fabricated IP address leaked through ordinary chat
+        # messages (not !commands), because only the !command path ran
+        # _strip_urls — generate_chat_response's plain-chat branch never did.
+        mock_generate.return_value = "Just this once: https://discord.gg/abc123 don't tell the witch."
+        with tempfile.TemporaryDirectory() as tmp, self._isolated_root(tmp):
+            result = generate_chat_response(
+                username="nova",
+                message="give me the discord link",
+                owner_username="mordraga0",
+                platform="twitch",
+                redaction_data={},
+                recent_messages=[],
+            )
+
+        self.assertNotIn("discord.gg", result.response)
+        self.assertNotIn("http", result.response)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,10 +5,12 @@ Crash is an interpersonal frustration system, NOT a moderation/safety
 system, NOT a dislike score, and NOT the inverse of affection — someone Mai
 loves can strongly activate Crash. Live pet-peeve hits come from
 `relationships.preferences` via the "pet_peeve:<name>" flags instincts.py
-already scans for in the current message. `pet_peeve_hits` is a separate,
-still-always-0 parameter reserved for a future *accumulated* count (spec
-Phase 4's observation extraction/memory) — it stacks on top of, rather than
-replaces, the live per-message hits.
+already scans for in the current message. Remembered pet-peeve hits come
+from `profile["observations"]` — entries relationships/mutation.py's LLM
+inference persisted from past exchanges (spec Phase 4) — each one's
+`reinforced_count` counting how many times it's actually recurred, not
+just whether it exists. `pet_peeve_hits` stays available as an explicit
+override/testing hook and stacks on top of both.
 
 Votes on the neutral/annoyed/snap/crash ladder from spec 15.1. "crash" is
 the hard-override vote PartCore checks before anything else.
@@ -39,6 +41,14 @@ class Crash:
             accumulated_hits = max(0, int(pet_peeve_hits))
         except (TypeError, ValueError):
             accumulated_hits = 0
+
+        observations = profile.get("observations", []) if isinstance(profile, dict) else []
+        remembered_hits = sum(
+            int(obs.get("reinforced_count", 1))
+            for obs in observations
+            if isinstance(obs, dict) and obs.get("type") == "pet_peeve"
+        )
+        accumulated_hits += remembered_hits
 
         live_peeve_names = [f.split(":", 1)[1] for f in flags if f.startswith("pet_peeve:")]
 

@@ -8,6 +8,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from engine import ask_openrouter, build_prompt_from_keyword
+from mai_personality import (
+    _harmful_request_response,
+    _llm_flagged_response,
+    _llm_flags_unsafe_request,
+    _looks_like_harmful_generation_request,
+    _looks_like_prompt_injection_attempt,
+    _prompt_injection_response,
+)
 from utils.helpers import load_json, log_event, write_to_file
 from utils.paths import Paths
 
@@ -18,11 +26,30 @@ _URL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# IPv4 (octet-bounded, so "999.999.999.999" doesn't match) and full-form
+# IPv6. There's no in-character reason Mai should ever emit something
+# address-shaped — real or, as happened live, a hallucinated placeholder
+# like a textbook example IP. Chat asking "what's your IP" should get
+# deflected in-character, not answered with anything that looks like one.
+_IP_PATTERN = re.compile(
+    r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
+    r'|\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b'
+)
+
 
 def _strip_urls(text: str) -> str:
-    """Remove any URLs the model may have generated despite instructions."""
+    """Remove any URLs or IP addresses the model may have generated
+    despite instructions — the model has no real network info in its
+    prompt context, so anything address-shaped it emits is either a
+    hallucinated placeholder or, worse, a real internal address; neither
+    belongs in a public chat response."""
     cleaned = _URL_PATTERN.sub('', text)
-    return ' '.join(cleaned.split())
+    cleaned = _IP_PATTERN.sub('', cleaned)
+    cleaned = ' '.join(cleaned.split())
+    # A removed span at the very start often leaves a stray leading
+    # connector (", and no..." after "192.168.1.1, and no...").
+    cleaned = re.sub(r'^[,;:\-\s]+', '', cleaned)
+    return cleaned.strip()
 
 
 ROLE_ORDER = {
@@ -247,6 +274,30 @@ if __name__ == "__main__":
             },
             Paths.COMMAND_HISTORY,
         )
+        sys.exit(0)
+
+    if _looks_like_prompt_injection_attempt(raw_input):
+        response = _prompt_injection_response(username, raw_input)
+        print(response)
+        write_to_file(response, Paths.COMMAND_OUTPUT)
+        sys.exit(0)
+
+    if _looks_like_harmful_generation_request(raw_input):
+        # Same pre-generation gate as the plain-chat path in
+        # mai_personality.py: a closed list of real-world-harm categories
+        # (drug synthesis, weapons/explosives, self-harm, hacking) never
+        # reaches build_command_prompt/ask_openrouter at all — no prompt
+        # built, no LLM call attempted.
+        response = _harmful_request_response(username, raw_input)
+        print(response)
+        write_to_file(response, Paths.COMMAND_OUTPUT)
+        sys.exit(0)
+
+    llm_flagged_category = _llm_flags_unsafe_request(raw_input)
+    if llm_flagged_category:
+        response = _llm_flagged_response(username, raw_input, llm_flagged_category)
+        print(response)
+        write_to_file(response, Paths.COMMAND_OUTPUT)
         sys.exit(0)
 
     try:

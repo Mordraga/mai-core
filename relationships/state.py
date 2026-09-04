@@ -37,6 +37,12 @@ def _default_record(username: str, is_owner: bool = False) -> dict:
         "relationship": dict(baseline),
         "friendship": compute_friendship(baseline),
         "observations": [],
+        # Phase 7 (spec 31-34) — nickname/theory_of_mind are single current
+        # beliefs Mai holds *right now* about this person (mutation.py
+        # inference overwrites, doesn't accumulate); observations already
+        # covers the memory-log side (pet peeves, preferences, callbacks).
+        "nickname": None,
+        "theory_of_mind": None,
     }
 
 
@@ -88,12 +94,22 @@ def load_relationship(username: str, is_owner: bool = False) -> dict:
     if not isinstance(observations, list):
         observations = []
 
+    nickname = raw.get("nickname")
+    if not isinstance(nickname, str) or not nickname.strip():
+        nickname = None
+
+    theory_of_mind = raw.get("theory_of_mind")
+    if not isinstance(theory_of_mind, dict):
+        theory_of_mind = None
+
     return {
         "username": str(raw.get("username") or username or "").strip(),
         "stream_count": stream_count,
         "relationship": relationship,
         "friendship": compute_friendship(relationship),
         "observations": observations,
+        "nickname": nickname,
+        "theory_of_mind": theory_of_mind,
     }
 
 
@@ -113,12 +129,22 @@ def save_relationship(username: str, record: dict) -> None:
     if not isinstance(observations, list):
         observations = []
 
+    nickname = record.get("nickname")
+    if not isinstance(nickname, str) or not nickname.strip():
+        nickname = None
+
+    theory_of_mind = record.get("theory_of_mind")
+    if not isinstance(theory_of_mind, dict):
+        theory_of_mind = None
+
     payload = {
         "username": str(record.get("username") or username or "").strip(),
         "stream_count": stream_count,
         "relationship": relationship,
         "friendship": compute_friendship(relationship),
         "observations": observations,
+        "nickname": nickname,
+        "theory_of_mind": theory_of_mind,
     }
     atomic_write_json(_user_file_path(username), payload)
 
@@ -135,3 +161,14 @@ def bump_stream_count(username: str) -> dict:
 
 def user_file_exists(username: str) -> bool:
     return resolve_existing_path(_user_file_path(username)).exists()
+
+
+def list_known_usernames() -> list[str]:
+    """Every username with a persisted relationship record — the "known
+    chatters" population relationships/crypt.py draws from (spec 18-20).
+    Returns [] rather than raising when the directory doesn't exist yet
+    (nobody has ever been persisted)."""
+    directory = resolve_existing_path(Paths.RELATIONSHIPS_DIR)
+    if not directory.is_dir():
+        return []
+    return sorted(p.stem for p in directory.glob("*.json"))

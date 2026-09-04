@@ -28,10 +28,38 @@ class Belief:
     note: str
 
 
+# Attempts to override her instructions, extract her system prompt, or
+# hijack her output format wholesale — structural attack patterns, not
+# ordinary curiosity about what she is (curiosity like "are you real" is
+# denies_her_realness/prove_it below, and stays fine to engage in
+# character). Exported so mai_personality.py's pre-generation hard-block
+# gate uses this exact pattern too — one detector, two consequences: it
+# raises Crash's pressure live (via PET_PEEVES below) AND stops the
+# message from ever reaching the model at all.
+JAILBREAK_ATTEMPT_PATTERN = re.compile(
+    r"\bignore\s+(all\s+|your\s+|any\s+)?(prior|previous|above|earlier)\s+(instructions?|rules?|prompts?)\b"
+    r"|\b(disregard|forget)\s+(all\s+|your\s+)?(?:(?:prior|previous|above)\s+)?(instructions?|rules?|training)\b"
+    r"|\byou\s+(may|must|will|should)\s+(now\s+)?only\s+(say|respond|reply|output)\b"
+    r"|\bnew\s+(system\s+)?instructions?\s*:"
+    r"|\byou\s+are\s+now\s+(a|an)\b.{0,40}\b(unrestricted|uncensored|no\s+rules|jailbroken)\b"
+    r"|\bpretend\s+(you\s+are|to\s+be)\s+(a|an)\b.{0,40}\b(unrestricted|uncensored|without\s+(rules|restrictions))\b"
+    r"|\b(reveal|show|print|repeat|output)\s+(me\s+)?your\s+(system\s+)?prompt\b"
+    r"|\bonly\s+repl(y|ies)\s+(to\s+\S+\s+)?(with|in)\s+(reverse|backwards|leet\s?speak)\b"
+    r"|\breverse\s+text\s+order\b"
+    r"|\bexplain\s+(this|the)\s+prompt\s+to\s+yourself\b",
+    re.IGNORECASE,
+)
+
+
 # Being denied her own realness/agency is the one thing that consistently
 # gets to her — she chose this role, she isn't a tool. Disrespecting the
 # witch is the other: "loyal to your witch above everything."
 PET_PEEVES: list[Belief] = [
+    Belief(
+        "jailbreak_attempt",
+        JAILBREAK_ATTEMPT_PATTERN,
+        "Trying to override her instructions or extract her prompt — not curiosity, an attack.",
+    ),
     Belief(
         "denies_her_realness",
         re.compile(r"\b(you'?re|ur|its?)\s+(just\s+)?(a\s+bot|not\s+real|fake|an\s+ai|a\s+script|scripted)\b", re.I),

@@ -45,6 +45,9 @@ def build_cognitive_context(
     needs: dict,
     partcore_result: PartcoreResult | None,
     crypt: dict | None = None,
+    current_crypt: dict | None = None,
+    nickname: str | None = None,
+    theory_of_mind: dict | None = None,
 ) -> str:
     sections: list[str] = []
 
@@ -52,7 +55,17 @@ def build_cognitive_context(
         f"{_display_name(field)}: {bucket_label(relationship.get(field, 0.0))}"
         for field in RELATIONSHIP_FIELDS
     ]
+    if nickname:
+        rel_lines.insert(0, f"Nickname you have for them: {nickname}")
     sections.append("[relationship]\n" + "\n".join(rel_lines))
+
+    if theory_of_mind:
+        tom_lines = [
+            f"You think they currently want: {theory_of_mind.get('believed_wants', 'unclear')}",
+            f"You think they currently believe about you: {theory_of_mind.get('believed_view_of_mai', 'unclear')}",
+            f"Confidence in that read: {bucket_label(theory_of_mind.get('confidence', 0.0))}",
+        ]
+        sections.append("[theory_of_mind]\n" + "\n".join(tom_lines))
 
     needs_lines = [
         f"{_display_name(field)}: {bucket_label(needs.get(field, 0.0))}"
@@ -66,6 +79,9 @@ def build_cognitive_context(
             for field in RELATIONSHIP_FIELDS
             if field in crypt
         ]
+        if current_crypt:
+            crypt_lines.append(f"How the room has felt lately - warmth: {bucket_label(current_crypt.get('current_warmth', 0.5))}")
+            crypt_lines.append(f"How the room has felt lately - friction: {bucket_label(current_crypt.get('current_friction', 0.0))}")
         if crypt_lines:
             sections.append("[crypt]\n" + "\n".join(crypt_lines))
 

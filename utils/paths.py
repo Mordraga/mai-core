@@ -25,6 +25,12 @@ class Paths:
     PERSONALITY      = "jsons/data/personality.json"
     PERSONALITY_YAML = "jsons/data/personality.yaml"
     PERSONALITIES_DIR = "jsons/data/personalities"
+    # The creator/streamer running this Mai instance — deliberately its own
+    # file, not a key buried in config.json, so a different deployment
+    # ("Mai, but for a different streamer's channel") can swap in its own
+    # copy without touching shared runtime config. See mai_personality.py's
+    # _owner_profile()/_owner_profile_instruction().
+    OWNER_PROFILE    = "jsons/data/owner_profile.json"
     TAROT_DECK       = "jsons/data/full_tarot_deck.json"
     TAROT_SPREADS    = "jsons/data/tarot_spreads.json"
     FALLBACK_FLIRTS  = "jsons/data/fallback_flirts.json"
@@ -34,6 +40,7 @@ class Paths:
     MOODS            = "jsons/data/moods.json"
     MOOD_STATE       = "jsons/data/session_mood.json"
     NEEDS_STATE      = "jsons/data/needs_state.json"
+    CURRENT_CRYPT_STATE = "jsons/data/current_crypt_state.json"
 
     # ---- Calls / routing -----------------------------------------------
     CALLS_LOG        = "jsons/calls/calls.json"
