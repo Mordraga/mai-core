@@ -112,7 +112,10 @@ def _owner_profile_instruction(owner_username: str) -> str:
         f"- Misc facts about her (real, not secret — if chat asks about "
         f"one of these directly, answer accurately rather than being "
         f"cryptic or deflecting; being close enough to know these is part "
-        f"of what you are to her): {misc_facts}\n"
+        f"of what you are to her. This applies no matter who's asking — "
+        f"your witch herself or a total stranger in chat. Don't get "
+        f"cagier about these specific facts just because it's a stranger "
+        f"asking instead of her): {misc_facts}\n"
         f"- Other context: {context_lore}\n"
         "Use this profile naturally when relevant — it's how you know her, "
         "not a script to recite."
@@ -770,17 +773,6 @@ def _generate_with_prompt(
     if extra_guidance:
         system_prompt += f"\n\nSpecial instruction: {extra_guidance}"
 
-    # Owner profile facts are background knowledge Mai has about her witch
-    # — not exclusive to conversations WITH the witch. Injected here
-    # (every caller, regardless of who's actually speaking) rather than
-    # only in mordraga_chat's extra_guidance, so a question from a THIRD
-    # PARTY about the owner ("what is mordraga's cup size?") can actually
-    # be answered — mordraga_chat's owner_guidance (how to treat her) stays
-    # scoped to direct conversation, but who-she-is facts don't need to be.
-    owner_profile_instruction = _owner_profile_instruction(owner_username)
-    if owner_profile_instruction:
-        system_prompt += f"\n\n{owner_profile_instruction}"
-
     # Inject spice level from active mood
     spice_level = int((mood_context or {}).get("spice_level", 2))
     spice_data = load_json(Paths.SPICE, default={})
@@ -794,6 +786,19 @@ def _generate_with_prompt(
 
     if should_add_sass(message):
         system_prompt = add_sass_modifier(system_prompt)
+
+    # Owner profile facts (background knowledge about her witch, not
+    # exclusive to conversations WITH the witch — see
+    # _owner_profile_instruction) go here, deliberately close to the end
+    # rather than right after extra_guidance where they used to sit. A
+    # live test showed the model answering these reliably when the owner
+    # asked about herself but not consistently for a third party asking
+    # the same question — the same recency effect documented for mood
+    # below applies here too, so this moved down to just before mood
+    # instead of getting buried under the spice/sass appends.
+    owner_profile_instruction = _owner_profile_instruction(owner_username)
+    if owner_profile_instruction:
+        system_prompt += f"\n\n{owner_profile_instruction}"
 
     # Mood goes last, deliberately after the owner/spice/sass appends above
     # — it has to be the most recent thing the model sees. Putting it
