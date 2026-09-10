@@ -7,6 +7,7 @@ touch_heartbeat/reroll_if_due.
 """
 from __future__ import annotations
 
+import random
 import threading
 import time
 
@@ -119,6 +120,18 @@ def touch_needs_heartbeat(last_touched_at: float | None) -> tuple[dict, float]:
             state = decay_needs(state, elapsed)
         write_needs_state(state)
         return state, now
+
+
+def randomize_needs_session() -> dict:
+    """Reroll every need to a fresh random value and persist it.
+
+    Called once per monitor start (mirrors mood_engine.start_monitor_session)
+    so each session opens on an unpredictable mood instead of continuing
+    wherever the last session's decay left off."""
+    with _needs_lock:
+        state = {key: clamp01(random.uniform(0.0, 1.0)) for key in NEEDS_FIELDS}
+        write_needs_state(state)
+        return state
 
 
 def apply_and_persist_needs_delta(deltas: dict) -> dict:
