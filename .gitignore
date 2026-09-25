@@ -5,3 +5,6 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
+
+# Runtime data / local test state — the consuming app ships its own jsons/.
+jsons/

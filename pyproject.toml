@@ -13,5 +13,5 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["engine", "mai_personality"]
-packages = ["utils", "daemons"]
+py-modules = ["engine", "mai_personality", "safety_gate"]
+packages = ["utils", "daemons", "relationships", "relationships.parts"]

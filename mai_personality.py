@@ -68,7 +68,7 @@ def _owner_profile() -> dict[str, str]:
     }
 
 
-def _owner_profile_instruction(owner_username: str) -> str:
+def _owner_profile_instruction(owner_username: str, for_third_party: bool = False) -> str:
     profile = _owner_profile()
     if not any(profile.values()):
         return ""
@@ -79,6 +79,15 @@ def _owner_profile_instruction(owner_username: str) -> str:
     role_identity = profile.get("role_identity") or "unknown"
     context_lore = profile.get("context_lore") or "none provided"
 
+    closing = (
+        "A chatter is asking about your witch. Answer using these facts if they're "
+        "relevant, but stay fully in character — don't recite this like a dossier. If "
+        "they ask about something not covered here, deflect or improvise in character "
+        "rather than inventing specifics."
+        if for_third_party
+        else "Use this profile naturally when relevant."
+    )
+
     return (
         "Owner profile details:\n"
         f"- Username: {username}\n"
@@ -86,8 +95,40 @@ def _owner_profile_instruction(owner_username: str) -> str:
         f"- Pronouns: {pronouns}\n"
         f"- Role/Identity: {role_identity}\n"
         f"- Context/Lore: {context_lore}\n"
-        "Use this profile naturally when relevant."
+        f"{closing}"
     )
+
+
+def _owner_mention_pattern(owner_username: str) -> re.Pattern | None:
+    """Regex matching any of the owner's known handles/names as a whole word.
+
+    Includes the username with trailing digits stripped (e.g. "mordraga0" ->
+    "mordraga") since chatters commonly drop a login's numeric suffix when
+    referring to someone by name. The "name" profile field may be a
+    comma-separated list of aliases/nicknames (optionally with a
+    parenthetical aside, e.g. "Mordie (hates being called Mordie)") — each
+    alias is split out into its own match token rather than treated as one
+    literal phrase.
+    """
+    profile = _owner_profile()
+    raw_candidates = [owner_username, profile.get("username"), profile.get("name")]
+    stripped = re.sub(r"\d+$", "", owner_username or "")
+    if stripped:
+        raw_candidates.append(stripped)
+
+    tokens: set[str] = set()
+    for raw in raw_candidates:
+        if not raw:
+            continue
+        for part in str(raw).split(","):
+            part = re.sub(r"\(.*?\)", "", part).strip()
+            if len(part) >= 3:
+                tokens.add(part)
+
+    if not tokens:
+        return None
+    alternation = "|".join(re.escape(t) for t in tokens)
+    return re.compile(rf"\b({alternation})\b", re.IGNORECASE)
 
 
 # Stable constant kept in Python so mai_monitor.py can import it directly.
@@ -99,8 +140,19 @@ WITCH_USERNAME: str = "mordraga0"  # <3
 # CONTEXT DETECTION
 # =============================
 
-def detect_context(message: str) -> str:
-    """Detect the context/topic of a message."""
+def detect_context(message: str, owner_username: str | None = None) -> str:
+    """Detect the context/topic of a message.
+
+    An owner mention (username, login-minus-digits, or profile name) is
+    checked first, regardless of who's speaking, so a chatter asking about
+    the owner gets routed to "owner_info" instead of falling through to a
+    generic personality pattern.
+    """
+    if owner_username:
+        mention_pattern = _owner_mention_pattern(owner_username)
+        if mention_pattern and mention_pattern.search(message):
+            return "owner_info"
+
     message_lower = message.lower()
     patterns: dict[str, list[str]] = _p("context_patterns", {})
     for context, pattern_list in patterns.items():
@@ -204,6 +256,7 @@ def build_contextual_prompt(
     context: str,
     recent_messages: list[str] | None = None,
     mood_context: dict | None = None,
+    cognitive_context: str | None = None,
 ) -> tuple[str, str]:
     """Build a context-aware prompt for Mai.
 
@@ -212,11 +265,21 @@ def build_contextual_prompt(
     """
     identity: str = _p("identity", "You are Mai, a flirty chaos familiar.")
     guidance_map: dict[str, str] = _p("context_guidance", {})
-    guidance = guidance_map.get(context, guidance_map.get("general", "React naturally."))
+    guidance = guidance_map.get(context)
+    if guidance is None:
+        if context == "owner_info":
+            guidance = (
+                "Someone's asking about your witch specifically. Answer using what you "
+                "actually know about her — stay fully in character, don't recite it "
+                "like a spec sheet."
+            )
+        else:
+            guidance = guidance_map.get("general", "React naturally.")
     recent_history_block = _format_recent_messages(username, recent_messages)
     mood_name = str((mood_context or {}).get("name", "neutral")).strip() or "neutral"
     mood_guidance = str((mood_context or {}).get("guidance", "")).strip() or "No special mood guidance."
     mood_block = f"Current session mood: {mood_name}\nMood guidance: {mood_guidance}"
+    cognitive_block = f"\n\n{cognitive_context.strip()}" if (cognitive_context or "").strip() else ""
 
     voice_examples = _recent_voice_examples(limit=3)
     voice_block = ""
@@ -234,7 +297,8 @@ def build_contextual_prompt(
         f"{identity}\n\n"
         f"Context detected: {context}\n"
         f"{recent_history_block}\n"
-        f"{mood_block}\n\n"
+        f"{mood_block}"
+        f"{cognitive_block}\n\n"
         f"{guidance}"
         f"{voice_block}\n\n"
         f"Respond as Mai in 15-20 words. Be natural, flirty, and sassy. Reference their message directly."
@@ -279,19 +343,28 @@ def _generate_with_prompt(
     extra_guidance: str = "",
     recent_messages: list[str] | None = None,
     mood_context: dict | None = None,
+    cognitive_context: str | None = None,
+    owner_username: str = WITCH_USERNAME,
 ) -> str:
     """Shared response generation path with optional user-specific guidance."""
-    context = detect_context(message)
+    context = detect_context(message, owner_username=owner_username)
     system_prompt, user_message = build_contextual_prompt(
         username,
         message,
         context,
         recent_messages=recent_messages,
         mood_context=mood_context,
+        cognitive_context=cognitive_context,
     )
 
     if extra_guidance:
         system_prompt += f"\n\nSpecial instruction: {extra_guidance}"
+    elif context == "owner_info":
+        # Non-owner path asking about the owner (mordraga_chat already folds
+        # this into extra_guidance when the owner is the one speaking).
+        owner_info_block = _owner_profile_instruction(owner_username, for_third_party=True)
+        if owner_info_block:
+            system_prompt += f"\n\n{owner_info_block}"
 
     # Inject spice level from active mood
     spice_level = int((mood_context or {}).get("spice_level", 2))
@@ -327,6 +400,7 @@ def generate_contextual_response(
     owner_username: str = WITCH_USERNAME,
     recent_messages: list[str] | None = None,
     mood_context: dict | None = None,
+    cognitive_context: str | None = None,
 ) -> str:
     """Generate a context-aware response using Mai's personality."""
     if is_mordraga(username, owner_username=owner_username):
@@ -337,6 +411,7 @@ def generate_contextual_response(
             owner_username=owner_username,
             recent_messages=recent_messages,
             mood_context=mood_context,
+            cognitive_context=cognitive_context,
         )
 
     return _generate_with_prompt(
@@ -345,6 +420,8 @@ def generate_contextual_response(
         llm_backend,
         recent_messages=recent_messages,
         mood_context=mood_context,
+        cognitive_context=cognitive_context,
+        owner_username=owner_username,
     )
 
 
@@ -355,6 +432,7 @@ def mordraga_chat(
     owner_username: str = WITCH_USERNAME,
     recent_messages: list[str] | None = None,
     mood_context: dict | None = None,
+    cognitive_context: str | None = None,
 ) -> str:
     """Owner-specific response path with stronger familiar-bond behavior."""
     owner_guidance: str = _p("owner_guidance", "Be extra loyal and affectionate, without being submissive.")
@@ -369,6 +447,8 @@ def mordraga_chat(
         recent_messages=recent_messages,
         extra_guidance=combined_guidance,
         mood_context=mood_context,
+        cognitive_context=cognitive_context,
+        owner_username=owner_username,
     )
 
 

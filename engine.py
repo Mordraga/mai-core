@@ -1,6 +1,7 @@
 import re
 import requests
 import json
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -115,6 +116,7 @@ def build_prompt_from_keyword(
     context: Mapping[str, Any] | None = None,
     registry: Mapping[str, Any] | None = None,
     templates: Mapping[str, Any] | None = None,
+    mood_context: Mapping[str, Any] | None = None,
 ) -> str:
     template_data = templates if templates is not None else load_json(Paths.PROMPT_TEMPLATES, default={})
     registry_data = registry if registry is not None else load_json(Paths.REGISTRY, default={})
@@ -128,6 +130,8 @@ def build_prompt_from_keyword(
     normalized_context.setdefault("owner_username", owner_username)
     normalized_context.setdefault("name", personality.get("name", "Mai"))
     normalized_context.setdefault("voice_hint", personality.get("voice_hint", "dry, cryptic, warm"))
+    normalized_context.setdefault("mood_name", str((mood_context or {}).get("name", "neutral")))
+    normalized_context.setdefault("mood_guidance", str((mood_context or {}).get("guidance", "")))
     safe = _TemplateSafeDict(normalized_context)
 
     template_key = _resolve_template_key(keyword, registry_data)
@@ -168,6 +172,18 @@ def build_prompt_from_keyword(
 # OpenRouter Backend
 # =============================
 
+def _rate_limit_delay(response: "requests.Response", attempt: int) -> float:
+    """Seconds to wait before retrying a 429. Honors Retry-After when the
+    provider sends one, otherwise backs off a little further each attempt."""
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return max(0.5, float(retry_after))
+        except ValueError:
+            pass
+    return 1.5 * (attempt + 1)
+
+
 def ask_openrouter(prompt: str, spicy: bool = False, system_prompt: str | None = None) -> str:
     config = load_config()
     keys = load_keys()
@@ -183,6 +199,7 @@ def ask_openrouter(prompt: str, spicy: bool = False, system_prompt: str | None =
     temp_key = "temperature_spicy" if spicy else "temperature_normal"
     temperature = mai_config.get(temp_key, mai_config.get("temperature_normal", 0.85))
     timeout = mai_config.get("timeout", 30)
+    max_retries = int(mai_config.get("rate_limit_retries", 2))
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -203,8 +220,25 @@ def ask_openrouter(prompt: str, spicy: bool = False, system_prompt: str | None =
         "temperature": temperature,
     }
 
-    try:
-        r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=timeout)
+    attempt = 0
+    while True:
+        try:
+            r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=timeout)
+        except requests.RequestException as e:
+            log_event("openrouter_error", {"error": str(e)}, Paths.ERROR_LOG)
+            return f"WARNING: OpenRouter error: {e}"
+
+        if r.status_code == 429 and attempt < max_retries:
+            delay = _rate_limit_delay(r, attempt)
+            log_event(
+                "openrouter_rate_limited",
+                {"attempt": attempt + 1, "model": model, "delay_seconds": delay},
+                Paths.ERROR_LOG,
+            )
+            time.sleep(delay)
+            attempt += 1
+            continue
+
         if not r.ok:
             detail = r.text[:500]
             try:
@@ -228,7 +262,9 @@ def ask_openrouter(prompt: str, spicy: bool = False, system_prompt: str | None =
             except ValueError:
                 pass
 
-            raise requests.HTTPError(f"{r.status_code} {r.reason}: {detail}", response=r)
+            error_str = f"{r.status_code} {r.reason}: {detail}"
+            log_event("openrouter_error", {"error": error_str}, Paths.ERROR_LOG)
+            return f"WARNING: OpenRouter error: {error_str}"
 
         data = r.json()
         try:
@@ -237,10 +273,6 @@ def ask_openrouter(prompt: str, spicy: bool = False, system_prompt: str | None =
             log_event("openrouter_error", {"error": f"malformed response: {e}", "raw": str(data)[:300]}, Paths.ERROR_LOG)
             return "WARNING: OpenRouter returned a malformed response"
         return strip_rp_formatting(content)
-
-    except requests.RequestException as e:
-        log_event("openrouter_error", {"error": str(e)}, Paths.ERROR_LOG)
-        return f"WARNING: OpenRouter error: {e}"
 
 
 # =============================

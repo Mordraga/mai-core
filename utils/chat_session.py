@@ -27,9 +27,15 @@ from mai_personality import (
     is_mordraga,
     mordraga_chat,
 )
-from utils.helpers import apply_tos_redaction, load_json
+from safety_gate import check_message_safety
+from utils.helpers import apply_tos_redaction, load_json, log_event
 from utils.mood_engine import resolve_effective_mood
 from utils.paths import Paths
+
+try:
+    from relationships import relationship_core
+except ImportError:
+    relationship_core = None
 
 
 @dataclass
@@ -40,6 +46,9 @@ class ChatResult:
     mood: str = "neutral"
     is_command: bool = False
     llm_error: str | None = None
+    cognitive_context: str | None = None
+    partcore_active: str | None = None
+    partcore_secondary: list[str] = field(default_factory=list)
 
 
 def _run_command(
@@ -159,12 +168,40 @@ def generate_chat_response(
     if cmd_result is not None:
         return cmd_result
 
-    context = detect_context(message)
+    # No owner exemption here: a trusted sender's own message can still ask
+    # for content (e.g. real-world violence) that shouldn't be generated
+    # regardless of who's asking. Disable via Gatekeeper.enabled in config
+    # if you need the check off entirely for testing.
+    is_safe, gate_reason = check_message_safety(message)
+    if not is_safe:
+        log_event(
+            "gatekeeper_blocked",
+            {"username": username, "message": message, "reason": gate_reason, "platform": platform},
+            Paths.SAFETY_LOG,
+        )
+        return ChatResult(response=get_contextual_fallback("blocked"), context="blocked", mood="neutral")
+
+    context = detect_context(message, owner_username=owner_username)
     mood_context = resolve_effective_mood("monitor", require_active_session=False)
     mood_name = str(mood_context.get("name", "neutral"))
     if spice_override is not None:
         mood_context = dict(mood_context)
         mood_context["spice_level"] = max(1, min(11, int(spice_override)))
+
+    cognitive_context = None
+    partcore_result = None
+    if relationship_core is not None:
+        try:
+            cognitive_context, partcore_result = relationship_core.build_cognitive_context(
+                username=username,
+                message=message,
+                recent_messages=recent_messages,
+                task=context,
+                owner_username=owner_username,
+            )
+        except Exception:
+            cognitive_context = None
+            partcore_result = None
 
     try:
         if is_mordraga(username, owner_username=owner_username):
@@ -175,6 +212,7 @@ def generate_chat_response(
                 owner_username=owner_username,
                 mood_context=mood_context,
                 recent_messages=recent_messages,
+                cognitive_context=cognitive_context,
             )
         else:
             response = generate_contextual_response(
@@ -184,6 +222,7 @@ def generate_chat_response(
                 owner_username=owner_username,
                 mood_context=mood_context,
                 recent_messages=recent_messages,
+                cognitive_context=cognitive_context,
             )
 
         if response.startswith("WARNING:"):
@@ -201,9 +240,32 @@ def generate_chat_response(
     if platform == "twitch":
         response, flagged = apply_tos_redaction(response, redaction_data)
 
+    if relationship_core is not None:
+        try:
+            relationship_core.post_response_update(
+                username=username,
+                message=message,
+                response=response,
+                task=context,
+                partcore_result=partcore_result,
+                owner_username=owner_username,
+            )
+        except Exception:
+            pass
+
+    partcore_active = None
+    partcore_secondary: list[str] = []
+    if partcore_result is not None:
+        if getattr(partcore_result, "active", None) is not None:
+            partcore_active = str(partcore_result.active.part)
+        partcore_secondary = [str(v.part) for v in getattr(partcore_result, "secondary", [])]
+
     return ChatResult(
         response=response,
         flagged_terms=flagged,
         context=context,
         mood=mood_name,
+        cognitive_context=cognitive_context,
+        partcore_active=partcore_active,
+        partcore_secondary=partcore_secondary,
     )

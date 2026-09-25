@@ -33,6 +33,7 @@ class Paths:
     COMMAND_ACCESS   = "jsons/data/command_access.json"
     MOODS            = "jsons/data/moods.json"
     MOOD_STATE       = "jsons/data/session_mood.json"
+    RELATIONSHIP_CONFIG = "jsons/data/relationship_config.json"
 
     # ---- Calls / routing -----------------------------------------------
     CALLS_LOG        = "jsons/calls/calls.json"
@@ -48,6 +49,8 @@ class Paths:
     FLAGGED_RESPONSES  = "jsons/logs/history/flagged_responses.json"
     USER_REGISTRY      = "jsons/logs/history/user_registry.json"
     USER_HISTORY_DIR   = "jsons/logs/history/users"
+    NEEDS_STATE        = "jsons/logs/history/needs_state.json"
+    CRYPT_STATE        = "jsons/logs/history/crypt_state.json"
 
     # ---- Errors --------------------------------------------------------
     ERROR_LOG        = "jsons/logs/errors/error_log.json"
