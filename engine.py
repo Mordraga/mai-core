@@ -184,7 +184,12 @@ def _rate_limit_delay(response: "requests.Response", attempt: int) -> float:
     return 1.5 * (attempt + 1)
 
 
-def ask_openrouter(prompt: str, spicy: bool = False, system_prompt: str | None = None) -> str:
+def ask_openrouter(
+    prompt: str,
+    spicy: bool = False,
+    system_prompt: str | None = None,
+    max_tokens: int | None = None,
+) -> str:
     config = load_config()
     keys = load_keys()
 
@@ -195,7 +200,9 @@ def ask_openrouter(prompt: str, spicy: bool = False, system_prompt: str | None =
         return f"WARNING: Missing OpenRouter API key in {Paths.KEYS}"
 
     model = mai_config.get("model", "mistralai/mistral-7b-instruct")
-    max_tokens = mai_config.get("max_tokens", 60)
+    # Per-call override for long-form output (e.g. multi-card tarot readings)
+    # that the shared chat-length default would cut off mid-sentence.
+    max_tokens = max_tokens or mai_config.get("max_tokens", 60)
     temp_key = "temperature_spicy" if spicy else "temperature_normal"
     temperature = mai_config.get(temp_key, mai_config.get("temperature_normal", 0.85))
     timeout = mai_config.get("timeout", 30)

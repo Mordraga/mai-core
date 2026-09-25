@@ -414,11 +414,17 @@ def generate_contextual_response(
             cognitive_context=cognitive_context,
         )
 
+    # The third-party owner-info block talks about "your witch"; without this,
+    # smaller models address whoever is speaking as the witch.
     return _generate_with_prompt(
         username,
         message,
         llm_backend,
         recent_messages=recent_messages,
+        extra_guidance=(
+            f"This user is {username}. They are NOT your witch ({owner_username}) — "
+            "never call them 'my witch' or treat them as your owner."
+        ),
         mood_context=mood_context,
         cognitive_context=cognitive_context,
         owner_username=owner_username,
